@@ -173,8 +173,7 @@ gradio_cached_examples/
 events.out.*
 
 # Data
-data
-!*/data
+/data/
 
 # Misc
 old/
@@ -197,8 +196,7 @@ vis_results/
 W/
 *.ply
 
-data/
 miniforge3/
-reference/
+/reference/
 
 **/*.glb
