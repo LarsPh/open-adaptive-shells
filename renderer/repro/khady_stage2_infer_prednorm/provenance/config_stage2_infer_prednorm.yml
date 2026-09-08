@@ -1,0 +1,239 @@
+!!python/object:nerfstudio.configs.base_config.Config
+data: null
+experiment_name: khady
+logging: !!python/object:nerfstudio.configs.base_config.LoggingConfig
+  enable_profiler: true
+  local_writer: !!python/object:nerfstudio.configs.base_config.LocalWriterConfig
+    _target: !!python/name:nerfstudio.utils.writer.LocalWriter ''
+    enable: true
+    max_log_size: 10
+    stats_to_track: !!python/tuple
+      - !!python/object/apply:nerfstudio.utils.writer.EventName
+        - Train Iter (time)
+      - !!python/object/apply:nerfstudio.utils.writer.EventName
+        - Train Rays / Sec
+      - !!python/object/apply:nerfstudio.utils.writer.EventName
+        - Test PSNR
+      - !!python/object/apply:nerfstudio.utils.writer.EventName
+        - Vis Rays / Sec
+      - !!python/object/apply:nerfstudio.utils.writer.EventName
+        - Test Rays / Sec
+  max_buffer_size: 20
+  relative_log_dir: !!python/object/apply:pathlib.WindowsPath []
+  steps_per_log: 10
+machine: !!python/object:nerfstudio.configs.base_config.MachineConfig
+  dist_url: auto
+  machine_rank: 0
+  num_gpus: 1
+  num_machines: 1
+  seed: 42
+method_name: adashell
+optimizers:
+  field_background:
+    optimizer: !!python/object:nerfstudio.engine.optimizers.AdamWOptimizerConfig
+      _target: !!python/name:torch.optim.adamw.AdamW &id001 ''
+      eps: 1.0e-15
+      lr: 0.01
+      weight_decay: 0.01
+    scheduler:
+      !!python/object:nerfstudio.engine.schedulers.DelayedExponentialSchedulerConfig
+      _target: !!python/name:nerfstudio.engine.schedulers.DelayedExponentialScheduler &id002 ''
+      delay_epochs: 5000
+      lr_final: 0.0001
+      lr_init: 0.01
+      max_steps: 200000
+  fields:
+    optimizer: !!python/object:nerfstudio.engine.optimizers.AdamWOptimizerConfig
+      _target: *id001
+      eps: 1.0e-15
+      lr: 0.01
+      weight_decay: 0.01
+    scheduler:
+      !!python/object:nerfstudio.engine.schedulers.DelayedExponentialSchedulerConfig
+      _target: *id002
+      delay_epochs: 5000
+      lr_final: 0.0001
+      lr_init: 0.01
+      max_steps: 200000
+output_dir: !!python/object/apply:pathlib.WindowsPath
+  - outputs
+pipeline:
+  !!python/object:nerfstudio.pipelines.base_pipeline.VanillaPipelineConfig
+  _target: !!python/name:nerfstudio.pipelines.base_pipeline.VanillaPipeline ''
+  datamanager:
+    !!python/object:nerfstudio.data.datamanagers.base_datamanager.VanillaDataManagerConfig
+    _target: !!python/name:nerfstudio.data.datamanagers.base_datamanager.VanillaDataManager ''
+    camera_optimizer:
+      !!python/object:nerfstudio.cameras.camera_optimizers.CameraOptimizerConfig
+      _target: !!python/name:nerfstudio.cameras.camera_optimizers.CameraOptimizer ''
+      mode: 'off'
+      optimizer:
+        !!python/object:nerfstudio.engine.optimizers.AdamOptimizerConfig
+        _target: !!python/name:torch.optim.adam.Adam ''
+        eps: 1.0e-08
+        lr: 0.0006
+        weight_decay: 0.01
+      orientation_noise_std: 0.0
+      param_group: camera_opt
+      position_noise_std: 0.0
+      scheduler: !!python/object:nerfstudio.engine.schedulers.SchedulerConfig
+        _target: !!python/name:nerfstudio.engine.schedulers.ExponentialDecaySchedule ''
+        lr_final: 5.0e-06
+        max_steps: 10000
+    camera_res_scale_factor: 1.0
+    dataparser:
+      !!python/object:nerfstudio.data.dataparsers.blender_dataparser.BlenderDataParserConfig
+      _target: !!python/name:nerfstudio.data.dataparsers.blender_dataparser.Blender ''
+      alpha_color: white
+      data: !!python/object/apply:pathlib.WindowsPath
+        - data
+        - khady
+      scale_factor: 1.0
+    eval_image_indices: !!python/tuple
+      - 0
+    eval_num_images_to_sample_from: -1
+    eval_num_rays_per_batch: 2138400 # 1980 * 1080
+    eval_num_times_to_repeat_images: -1
+    train_num_images_to_sample_from: -1
+    train_num_rays_per_batch: 2048
+    train_num_times_to_repeat_images: -1
+  model: !!python/object:nerfstudio.models.adashell.AdashellModelConfig
+    _target: !!python/name:nerfstudio.models.adashell.AdashellModel ''
+    shell_inference_mode: true
+    shell_finetune_mode: false
+    stage2_color_only_loss: false
+    shell_use_packed_samples: true
+    shell_ray_tracing_backend: optix
+    shell_use_inner_mesh: true
+    use_learned_inv_s_for_upsampling: false
+    dilation_mesh_path: 'meshes/shell_debug-dilation.ply'
+    erosion_mesh_path: 'meshes/shell_debug-erosion.ply'
+    n_sample_max: 8
+    n_depth_peeling_max: 16
+    sample_spacing: 0.01
+    single_sample_threshold: 0.02
+    optix_debug_render: false
+    background_color: white
+    background_model: none
+    base_variance: 64
+    beta_anneal_end: 0.0002
+    beta_anneal_init: 0.05
+    beta_anneal_max_num_iters: 1000000
+    collider_params:
+      far_plane: 6.0
+      near_plane: 2.0
+    curvature_loss_multi: 0.0
+    curvature_loss_warmup_steps: 20000
+    eikonal_loss_mult: 0.01
+    enable_collider: true
+    enable_curvature_loss_schedule: false
+    enable_numerical_gradients_schedule: false
+    enable_progressive_hash_encoding: false
+    eval_num_rays_per_chunk: 16384
+    far_plane: 4.0
+    far_plane_bg: 1000.0
+    fg_mask_loss_mult: 0.01
+    kernel_size_smoothness_loss_mult: 0.01
+    level_init: 8
+    loss_coefficients:
+      rgb_loss_coarse: 1.0
+      rgb_loss_fine: 1.0
+    min_patch_variance: 0.01
+    mono_depth_loss_mult: 0.0
+    mono_normal_loss_mult: 0.0
+    near_plane: 0.05
+    num_samples: 64
+    num_samples_importance: 64
+    num_samples_outside: 32
+    num_up_sample_steps: 4
+    overwrite_near_far_plane: false
+    patch_size: 11
+    patch_warp_angle_thres: 0.3
+    patch_warp_loss_mult: 0.0
+    periodic_tvl_mult: 0.0
+    perturb: true
+    pred_normal_loss_mult: 0.001
+    s3im_kernel_size: 4
+    s3im_loss_mult: 0.0
+    s3im_patch_height: 32
+    s3im_repeat_time: 10
+    s3im_stride: 4
+    scene_contraction_norm: inf
+    sdf_field:
+      !!python/object:nerfstudio.fields.adashell_field.AdashellFieldConfig
+      _target: !!python/name:nerfstudio.fields.adashell_field.AdashellField ''
+      color_normal_source: pred
+      appearance_embedding_dim: 32
+      base_res: 16
+      beta_init: 0.3
+      bias: 0.5
+      density_beta_mode: kernel_size
+      divide_factor: 2.0
+      encoding_type: hash
+      geo_feat_dim: 26
+      geometric_init: true
+      hash_features_per_level: 2
+      hash_smoothstep: true
+      hidden_dim: 64
+      hidden_dim_color: 64
+      inside_outside: true
+      kernel_size_smoothness_sigma: 0.1
+      kernel_size_transform_exp_factor: 10.0
+      kernel_size_transform_mode: exp
+      log2_hashmap_size: 22
+      max_res: 4096
+      num_layers: 1
+      num_layers_color: 2
+      num_levels: 14
+      off_axis: false
+      rgb_padding: 0.001
+      use_appearance_embedding: false
+      use_diffuse_color: false
+      use_grid_feature: true
+      use_n_dot_v: false
+      use_numerical_gradients: true
+      use_reflections: false
+      use_specular_tint: false
+      weight_norm: true
+    sensor_depth_freespace_loss_mult: 0.0
+    sensor_depth_l1_loss_mult: 0.0
+    sensor_depth_sdf_loss_mult: 0.0
+    sensor_depth_truncation: 0.015
+    sparse_points_sdf_loss_mult: 0.0
+    steps_per_level: 5000
+    topk: 4
+    use_anneal_beta: false
+    use_average_appearance_embedding: false
+timestamp: '{timestamp}'
+trainer: !!python/object:nerfstudio.configs.base_config.TrainerConfig
+  accumulate_grad_steps: 1
+  load_config: null
+  load_dir: !!python/object/apply:pathlib.WindowsPath
+    - outputs
+    - khady
+    - adashell
+    - 2025-01-24_235437
+    - sdfstudio_models
+  load_scheduler: true
+  load_step: null
+  max_num_iterations: 100000
+  mixed_precision: false
+  relative_model_dir: !!python/object/apply:pathlib.WindowsPath
+    - sdfstudio_models
+  sanity_check: false
+  save_only_latest_checkpoint: true
+  steps_per_eval_all_images: 1000000
+  steps_per_eval_batch: 5000
+  steps_per_eval_image: 5000
+  steps_per_save: 10000
+viewer: !!python/object:nerfstudio.configs.base_config.ViewerConfig
+  ip_address: 127.0.0.1
+  launch_bridge_server: true
+  max_num_display_images: 512
+  num_rays_per_chunk: 32768
+  quit_on_train_completion: false
+  relative_log_filename: viewer_log_filename.txt
+  start_train: true
+  websocket_port: 7007
+  zmq_port: null
+vis: viewer

@@ -1,0 +1,23 @@
+Adaptive Shells
+Copyright (c) 2026 Zhaorong Wang
+
+An unofficial implementation of Adaptive Shells for Efficient Neural Radiance
+Field Rendering, Zian Wang et al., SIGGRAPH Asia 2023.
+https://research.nvidia.com/labs/toronto-ai/adaptive-shells/
+
+Training is derived from SDFStudio (https://github.com/autonomousvision/sdfstudio)
+and Nerfstudio (https://github.com/nerfstudio-project/nerfstudio).
+Copyright 2022 The Nerfstudio Team. All rights reserved.
+Their Apache-2.0 license and source-file notices are retained.
+Modifications include adaptive-shell training, shell extraction and tracing,
+predicted-gradient fine-tuning, and checkpoint compatibility.
+
+The renderer's legacy_field.py adapts the SDFStudio/Nerfstudio neural-field
+structure for checkpoint loading and retains Apache-2.0. Original renderer
+code is available under renderer/LICENSE (MIT).
+
+The python-optix build patch modifies the MIT-licensed work of Felix Igelbrink.
+Copyright (c) 2021 Felix Igelbrink.
+The tiny-cuda-nn build patch modifies the BSD-3-Clause-licensed work of NVIDIA.
+Dependency licenses remain with their upstream sources; see
+renderer/docs/dependencies.md.

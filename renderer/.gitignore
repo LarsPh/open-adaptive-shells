@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# CUDA / profiling outputs
+*.nvvp
+*.nsys-rep
+*.qdrep
+
+# Local runtime artifacts
+outputs/
+checkpoints/
+logs/
+tmp/
+repro/**/outputs*/
+repro/**/assets/meshes/
+imgui.ini
+
+# Personal research and development notes
+HANDOFF.md
+docs/*.zh.md

@@ -1,0 +1,62 @@
+{
+  "camera_path": "../../training/data/horse/transforms_test.json",
+  "checkpoint": "../../training/outputs/horse/adashell/stage2/sdfstudio_models/step-000299999.ckpt",
+  "cuda_src_filename": "narrow_band.cu",
+  "device": "cuda",
+  "use_fastpath": true,
+  "field": {
+    "appearance_embedding_dim": 32,
+    "base_res": 16,
+    "color_normal_source": "pred",
+    "geo_feat_dim": 26,
+    "hash_features_per_level": 2,
+    "hash_smoothstep": true,
+    "hidden_dim": 64,
+    "hidden_dim_color": 64,
+    "kernel_size_transform_exp_factor": 10,
+    "kernel_size_transform_mode": "exp",
+    "log2_hashmap_size": 22,
+    "max_res": 4096,
+    "num_layers": 1,
+    "num_layers_color": 2,
+    "num_levels": 14,
+    "rgb_padding": 0.001,
+    "pred_gradient_alpha_min_norm": 0.001,
+    "pred_gradient_alpha_max_norm": 10,
+    "use_average_appearance_embedding": false,
+    "use_grid_feature": true,
+    "use_n_dot_v": false,
+    "use_reflections": false,
+    "drjit_direct_torch_bridge": true,
+    "use_drjit_color_mlp": true,
+    "use_drjit_geo_mlp": true,
+    "use_drjit_hash_encoding": true
+  },
+  "mesh_assets": {
+    "base_mesh": null,
+    "dilation_mesh": "../../training/outputs/horse/adashell/stage1/shell-dilation.ply",
+    "erosion_mesh": "../../training/outputs/horse/adashell/stage1/shell-erosion.ply"
+  },
+  "provenance_config": "../../training/outputs/horse/adashell/stage2/config.yml",
+  "render": {
+    "alpha_mode": "pred_gradient",
+    "ray_t_far": 15,
+    "ray_t_near": 0.01,
+    "white_background": true
+  },
+  "trace": {
+    "compress_same_flag_runs": true,
+    "min_interval_size": 0.0001,
+    "n_depth_peeling_max": 20,
+    "n_sample_max": 16,
+    "sample_spacing": 0.01,
+    "single_sample_threshold": 0.02
+  },
+  "profiling": {
+    "drjit_kernel_history": false,
+    "geo_island_prewarm": true,
+    "geo_island_profile": false,
+    "strict_timing": false,
+    "trace_blocking": false
+  }
+}

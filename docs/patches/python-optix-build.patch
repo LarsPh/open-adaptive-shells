@@ -1,0 +1,12 @@
+diff --git a/setup.py b/setup.py
+--- a/setup.py
++++ b/setup.py
+@@ -147,7 +147,7 @@ setup(
+     ext_modules=extensions,
+     install_requires=[
+         'numpy',
+-        'cupy>=9.0'
++        'cupy-cuda12x>=13.4.1',
+     ],
+     license="MIT",
+     classifiers=[

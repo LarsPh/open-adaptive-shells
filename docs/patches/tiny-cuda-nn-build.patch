@@ -1,0 +1,142 @@
+diff --git a/bindings/torch/setup.py b/bindings/torch/setup.py
+index 041936c..e834578 100644
+--- a/bindings/torch/setup.py
++++ b/bindings/torch/setup.py
+@@ -1,18 +1,68 @@
+ import os
+ 
+ import re
++from packaging.version import parse as parse_version
+ from setuptools import setup
+-from pkg_resources import parse_version
+ import subprocess
+ import shutil
+ import sys
+-import torch
+ from glob import glob
+-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
++
++
++def _is_metadata_only_build() -> bool:
++	"""True when setuptools is only collecting metadata (no native build)."""
++	metadata_cmds = {"egg_info", "dist_info"}
++	return any(arg in metadata_cmds for arg in sys.argv[1:])
++
++
++if _is_metadata_only_build():
++	# Avoid importing torch/cpp extensions during metadata generation.
++	torch = None
++	cpp_extension = None
++	BuildExtension = None
++	CUDAExtension = None
++else:
++	import torch
++	import torch.utils.cpp_extension as cpp_extension
++	from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+ 
+ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+ ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+ 
++if not _is_metadata_only_build():
++	if "CUDA_HOME" not in os.environ:
++		if "CUDA_PATH" in os.environ and os.environ["CUDA_PATH"]:
++			os.environ["CUDA_HOME"] = os.environ["CUDA_PATH"]
++		else:
++			nvcc_path = shutil.which("nvcc")
++			if nvcc_path is not None:
++				os.environ["CUDA_HOME"] = os.path.dirname(os.path.dirname(nvcc_path))
++
++	cpp_extension.CUDA_HOME = os.environ.get("CUDA_HOME")
++
++
++def ensure_torch_cuda_cmake_header() -> None:
++	"""Some torch wheels miss this generated header in isolated build envs."""
++	if torch is None:
++		return
++	torch_root = os.path.dirname(torch.__file__)
++	header_path = os.path.join(
++		torch_root, "include", "c10", "cuda", "impl", "cuda_cmake_macros.h"
++	)
++	if os.path.exists(header_path):
++		return
++	os.makedirs(os.path.dirname(header_path), exist_ok=True)
++	with open(header_path, "w", encoding="utf-8") as f:
++		f.write(
++			"#pragma once\n\n"
++			"// Auto-created by tinycudann setup.py for wheel compatibility.\n"
++			"#define C10_CUDA_BUILD_SHARED_LIBS\n"
++		)
++	print(f"Created missing torch CUDA header: {header_path}")
++
++
++ensure_torch_cuda_cmake_header()
++
+ def min_supported_compute_capability(cuda_version):
+ 	if cuda_version >= parse_version("13.0"):
+ 		return 75
+@@ -44,7 +94,9 @@ print(f"Building PyTorch extension for tiny-cuda-nn version {VERSION}")
+ 
+ ext_modules = []
+ 
+-if "TCNN_CUDA_ARCHITECTURES" in os.environ and os.environ["TCNN_CUDA_ARCHITECTURES"]:
++if _is_metadata_only_build():
++	compute_capabilities = []
++elif "TCNN_CUDA_ARCHITECTURES" in os.environ and os.environ["TCNN_CUDA_ARCHITECTURES"]:
+ 	compute_capabilities = [int(x) for x in os.environ["TCNN_CUDA_ARCHITECTURES"].replace(";", ",").split(",")]
+ 	print(f"Obtained compute capabilities {compute_capabilities} from environment variable TCNN_CUDA_ARCHITECTURES")
+ elif torch.cuda.is_available():
+@@ -105,9 +157,10 @@ if os.system("nvcc --version") == 0:
+ 			print(f"WARNING: Compute capabilities {compute_capabilities} are not all supported by the installed CUDA version {cuda_version}. Targeting {supported_compute_capabilities} instead.")
+ 			compute_capabilities = supported_compute_capabilities
+ 
+-min_compute_capability = min(compute_capabilities)
++min_compute_capability = min(compute_capabilities) if compute_capabilities else 0
+ 
+-print(f"Targeting C++ standard {cpp_standard}")
++if not _is_metadata_only_build():
++	print(f"Targeting C++ standard {cpp_standard}")
+ 
+ base_nvcc_flags = [
+ 	f"-std=c++{cpp_standard}",
+@@ -146,7 +199,9 @@ base_definitions = [
+ 	"-DTCNN_RTC_USE_FAST_MATH",
+ ]
+ 
+-if "TCNN_HALF_PRECISION" in os.environ:
++if _is_metadata_only_build():
++	enable_half = True
++elif "TCNN_HALF_PRECISION" in os.environ:
+     enable_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
+     base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
+     print(f"Forcing TCNN_HALF_PRECISION to {'ON' if enable_half else 'OFF'}")
+@@ -234,7 +289,7 @@ def make_extension(compute_capability):
+ 	)
+ 	return ext
+ 
+-ext_modules = [make_extension(comp) for comp in compute_capabilities]
++ext_modules = [] if _is_metadata_only_build() else [make_extension(comp) for comp in compute_capabilities]
+ 
+ def package_files(directory):
+ 	paths = []
+@@ -273,5 +328,5 @@ setup(
+ 	include_package_data=True,
+ 	zip_safe=False,
+ 	ext_modules=ext_modules,
+-	cmdclass={"build_ext": BuildExtension}
++	cmdclass={} if _is_metadata_only_build() else {"build_ext": BuildExtension}
+ )
+diff --git a/bindings/torch/pyproject.toml b/bindings/torch/pyproject.toml
+new file mode 100644
+--- /dev/null
++++ b/bindings/torch/pyproject.toml
+@@ -0,0 +1,10 @@
++[build-system]
++requires = [
++    "numpy",
++    "packaging",
++    "setuptools>=61,<82",
++    "torch",
++    "wheel",
++]
++build-backend = "setuptools.build_meta"
++

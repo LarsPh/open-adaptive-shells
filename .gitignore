@@ -1,0 +1,26 @@
+# Local environments, datasets and build products
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+outputs/
+dist/
+/data/
+
+# Local native dependency checkouts used by training/pyproject.toml
+/python-optix/
+/tiny-cuda-nn/
+
+# Personal development records and editor settings
+HANDOFF*.md
+.specstory/
+.vscode/
+*.code-workspace
+*.swp
+.env
+
+# Local experiment notes
+/training/docs/sdfstudio-adashell-performance-roadmap*.md
+/training/docs/adashell_loss_scale_audit_zh.md
+/training/docs/tcnn_torch_compat_validation_zh.md
