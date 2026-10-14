@@ -264,6 +264,15 @@ class DrJitFieldIsland:
             profile["field_island_sample_mask_enabled"] = 1.0
         else:
             profile["field_island_sample_mask_enabled"] = 0.0
+        # The prefix sum below splits the frame into two kernels. Store alpha and
+        # the color inputs from the first one; otherwise the second kernel
+        # re-runs the hash encoding and geo MLP to get them back.
+        # The MLP emits fp16, so storing these columns as fp16 loses nothing.
+        stored_cols = tuple(dr.cuda.Float16(col) for col in (*geo_feature_cols, *pred_normal_cols))
+        dr.schedule(alpha_dr, *stored_cols)
+        stored_cols = tuple(dr.cuda.Float(col) for col in stored_cols)
+        geo_feature_cols = stored_cols[: len(geo_feature_cols)]
+        pred_normal_cols = stored_cols[len(geo_feature_cols) :]
         trans_dr = self._exclusive_transmittance(alpha_dr, packed_cache)
         weights_dr = alpha_dr * trans_dr
         profile["field_island_weight_ms"] = (time.perf_counter() - weight_start) * 1000.0
