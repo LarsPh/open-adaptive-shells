@@ -18,6 +18,18 @@ static __forceinline__ __device__ float3 normalize3(const float3 v) {
     return mul3f(v, inv_len);
 }
 
+static __forceinline__ __device__ unsigned int interval_sample_count(const float interval_len, const unsigned int n_sample_max,
+                                                                     const float single_sample_threshold, const float sample_spacing) {
+    int n_samples = (int)ceilf(fmaxf(interval_len - single_sample_threshold, 0.0f) / sample_spacing) + 1;
+    if (n_samples < 1) {
+        n_samples = 1;
+    }
+    if (n_samples > (int)n_sample_max) {
+        n_samples = (int)n_sample_max;
+    }
+    return (unsigned int)n_samples;
+}
+
 struct Params {
     unsigned long long depth_buffer;
     unsigned long long hit_t_buffer;
@@ -131,6 +143,11 @@ extern "C" __global__ void __raygen__rg() {
     float erosion_t = __uint_as_float(p0);
     erosion_first_t[ray_idx] = erosion_t;
 
+    // Hits past the inner shell can only close an interval at erosion_t, so
+    // tracing stops at the first one; its flag still decides how the last
+    // interval closes.
+    const bool has_inner = erosion_t > 0.0f;
+    bool passed_inner = false;
     unsigned int count = 0;
     for (unsigned int i = 0; i < params.max_hits; i++) {
         p0 = __float_as_uint(-1.0f);
@@ -160,6 +177,10 @@ extern "C" __global__ void __raygen__rg() {
         }
         dilation_hit_flag[hit_buffer_base + i] = p1;
         ++count;
+        if (has_inner && t > erosion_t) {
+            passed_inner = true;
+            break;
+        }
         current_tmin = t + 1e-4f;
         if (!(ray_tmax > current_tmin)) {
             break;
@@ -203,21 +224,26 @@ extern "C" __global__ void __raygen__rg() {
             if (commit && ((d_exit - current_enter) >= params.min_interval_size) && pair_count < params.max_intervals) {
                 interval_start[interval_buffer_base + pair_count] = current_enter;
                 interval_end[interval_buffer_base + pair_count] = d_exit;
-                const float interval_len = d_exit - current_enter;
-                int n_samples = (int)ceilf(fmaxf(interval_len - params.single_sample_threshold, 0.0f) / params.sample_spacing) + 1;
-                if (n_samples < 1) {
-                    n_samples = 1;
-                }
-                if (n_samples > (int)params.n_sample_max) {
-                    n_samples = (int)params.n_sample_max;
-                }
-                ray_sample_count += (unsigned int)n_samples;
+                ray_sample_count += interval_sample_count(
+                    d_exit - current_enter, params.n_sample_max, params.single_sample_threshold, params.sample_spacing);
                 pair_count += 1u;
             }
             if (commit) {
                 has_open = false;
                 current_enter = 0.0f;
                 finished = isfinite(inner_t) && (inner_t < t);
+            }
+        }
+        // A full trace would have reached the closing exit beyond the inner
+        // shell and committed the open interval clipped to it.
+        if (passed_inner && has_open && !finished) {
+            const float d_exit = inner_t;
+            if (((d_exit - current_enter) >= params.min_interval_size) && pair_count < params.max_intervals) {
+                interval_start[interval_buffer_base + pair_count] = current_enter;
+                interval_end[interval_buffer_base + pair_count] = d_exit;
+                ray_sample_count += interval_sample_count(
+                    d_exit - current_enter, params.n_sample_max, params.single_sample_threshold, params.sample_spacing);
+                pair_count += 1u;
             }
         }
         interval_count[ray_idx] = pair_count;
