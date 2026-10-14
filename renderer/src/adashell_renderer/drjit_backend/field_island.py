@@ -20,12 +20,18 @@ class DrJitFieldIsland:
     white_background: bool = True
     profile_geo: bool = False
     prewarm: bool = True
+    freeze: bool = False
     _interop: DrJitInterop = field(init=False, repr=False)
     _prewarmed_devices: set[str] = field(init=False, repr=False)
+    _frozen_core: Any = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
         self._interop = DrJitInterop.create()
         self._prewarmed_devices = set()
+        if self.freeze:
+            self._frozen_core = self._interop.dr.freeze(
+                self._frozen_core_impl, state_fn=self._frozen_state, warn_after=4,
+            )
 
     def _prewarm_device(self, device: torch.device, profile: dict[str, float]) -> None:
         if not self.prewarm:
@@ -106,6 +112,12 @@ class DrJitFieldIsland:
         next_cdf_dr = 1.0 / (1.0 + dr.exp(-(estimated_next_sdf_dr * inv_s_dr)))
         return dr.clip(((prev_cdf_dr - next_cdf_dr) + 1e-5) / (prev_cdf_dr + 1e-5), 0.0, 1.0)
 
+    def _zeros_like(self, value: Any) -> Any:
+        # A literal sized by dr.width() would bake this frame's sample count
+        # into a frozen recording; arange keeps the width implicit.
+        dr = self._interop.dr
+        return dr.arange(dr.cuda.Float, dr.width(value)) * 0.0
+
     def _color_channels(
         self,
         *,
@@ -131,9 +143,9 @@ class DrJitFieldIsland:
         dir_features_cols = field_model._sh_encoding_dr(dir_cols, field_model.direction_encoding.levels)
         if field_model.use_average_appearance_embedding:
             mean_app = field_model.embedding_appearance.mean(dim=0).to(device=device, dtype=torch.float32)
-            appearance_cols = tuple(dr.zeros(dr.cuda.Float, shape=width) + float(mean_app[idx].item()) for idx in range(mean_app.shape[0]))
+            appearance_cols = tuple(self._zeros_like(query_point_cols[0]) + float(mean_app[idx].item()) for idx in range(mean_app.shape[0]))
         else:
-            appearance_cols = tuple(dr.zeros(dr.cuda.Float, shape=width) for _ in range(field_model.config.appearance_embedding_dim))
+            appearance_cols = tuple(self._zeros_like(query_point_cols[0]) for _ in range(field_model.config.appearance_embedding_dim))
         input_cols = tuple(query_point_cols) + tuple(dir_features_cols) + tuple(shading_cols) + tuple(feature_cols) + tuple(appearance_cols)
         if field_model.config.use_n_dot_v:
             n_dot_v = normals_cols[0] * dir_cols[0] + normals_cols[1] * dir_cols[1] + normals_cols[2] * dir_cols[2]
@@ -399,6 +411,9 @@ class DrJitFieldIsland:
         packed_cache = packed.metadata["_drjit_cache"]
         self._prewarm_device(device, profile)
 
+        if self._frozen_core is not None and packed.valid_samples > 0:
+            return self._render_frozen(rays, packed, packed_cache, device, materialize_aux_outputs, diagnostic_mode, profile)
+
         query_point_cols: tuple[Any, Any, Any] | None = None
         ray_dir_cols: tuple[Any, Any, Any] | None = None
         if packed.valid_samples > 0:
@@ -427,3 +442,97 @@ class DrJitFieldIsland:
         render_buffer.diagnostics["sample_count"] = self._interop.dr.cuda.Float(packed_cache["sample_counts"])
         render_buffer.metadata["diagnostics"] = render_buffer.diagnostics
         return render_buffer
+
+    def _frozen_state(self, inputs: dict[str, Any], num_rays: int, device: torch.device, *args: Any) -> tuple[Any, ...]:
+        # Parameters live on the field model rather than in the arguments, so
+        # hand them to dr.freeze explicitly; it must see every array it reads.
+        # forward_dr() packs column inputs under the index-less "cuda" device key.
+        field_model = self.field_model
+        column_device = torch.device("cuda")
+        return (
+            field_model.hash_encoding_dr,
+            field_model.geo_mlp_dr._dr_layers(column_device),
+            field_model.color_mlp_dr._dr_layers(column_device),
+        )
+
+    def _frozen_core_impl(
+        self,
+        inputs: dict[str, Any],
+        num_rays: int,
+        device: torch.device,
+        materialize_aux_outputs: bool,
+        diagnostic_mode: str,
+    ) -> dict[str, Any]:
+        """Query points through compositing, traced once and replayed by dr.freeze.
+
+        Only Dr.Jit arrays and per-configuration constants enter here; the
+        sample count varies between frames and must stay implicit.
+        """
+        dr = self._interop.dr
+        ray_indices_dr = inputs["ray_indices"]
+        ray_dir_cols = tuple(dr.gather(dr.cuda.Float, col, ray_indices_dr) for col in inputs["directions"])
+        query_point_cols = tuple(
+            dr.gather(dr.cuda.Float, inputs["origins"][idx], ray_indices_dr) + ray_dir_cols[idx] * inputs["eval_t"]
+            for idx in range(3)
+        )
+        buffer = self._render_rgb_core_dr(
+            query_point_cols=query_point_cols,
+            ray_dir_cols=ray_dir_cols,
+            packed_cache=inputs,
+            num_rays=num_rays,
+            valid_samples=1,
+            image_width=0,
+            image_height=0,
+            device=device,
+            materialize_aux_outputs=materialize_aux_outputs,
+            diagnostic_mode=diagnostic_mode,
+            profile={},
+        )
+        outputs: dict[str, Any] = {"rgb": tuple(buffer.rgb_channels), "diagnostics": dict(buffer.diagnostics)}
+        if materialize_aux_outputs:
+            outputs["depth"] = buffer.depth
+            outputs["accumulation"] = buffer.accumulation
+        return outputs
+
+    def _render_frozen(
+        self,
+        rays: RayBatch,
+        packed: IntervalPack,
+        packed_cache: dict[str, Any],
+        device: torch.device,
+        materialize_aux_outputs: bool,
+        diagnostic_mode: str,
+        profile: dict[str, float],
+    ) -> DrRenderBuffer:
+        rays_cache = self.field_model._rays_dr_cache(rays)
+        inputs = {
+            "origins": tuple(rays_cache["origins_xyz"]),
+            "directions": tuple(rays_cache["directions_xyz"]),
+            "ray_indices": packed_cache["ray_indices"],
+            "eval_t": packed_cache["eval_t"],
+            "deltas": packed_cache["deltas"],
+            "ray_offsets": packed_cache["ray_offsets"],
+        }
+        start = time.perf_counter()
+        outputs = self._frozen_core(inputs, int(packed.num_rays), device, bool(materialize_aux_outputs), diagnostic_mode)
+        profile["field_island_frozen_call_ms"] = (time.perf_counter() - start) * 1000.0
+        profile["field_island_frozen_recordings"] = float(self._frozen_core.n_recordings)
+        diagnostics = dict(outputs["diagnostics"])
+        diagnostics["sample_count"] = self._interop.dr.cuda.Float(packed_cache["sample_counts"])
+        return DrRenderBuffer(
+            rgb_channels=tuple(outputs["rgb"]),
+            depth=outputs.get("depth"),
+            accumulation=outputs.get("accumulation"),
+            diagnostics=diagnostics,
+            num_rays=packed.num_rays,
+            image_width=int(rays.metadata.get("image_width", 0)),
+            image_height=int(rays.metadata.get("image_height", 0)),
+            metadata={
+                "backend": "drjit_field_island",
+                "impl": "dr_render_buffer_frozen",
+                "profile_stage_ms": profile,
+                "aux_outputs_materialized": float(1.0 if materialize_aux_outputs else 0.0),
+                "diagnostic_mode": diagnostic_mode,
+                "diagnostics": diagnostics,
+            },
+        )

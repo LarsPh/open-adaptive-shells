@@ -79,6 +79,8 @@ class RenderConfig:
     pixel_center_offset: float = 0.5
     white_background: bool = True
     alpha_mode: str = "pred_gradient"
+    # Replay the recorded field kernels with dr.freeze instead of re-tracing each frame.
+    freeze_field: bool = True
 
 
 @dataclass(slots=True)

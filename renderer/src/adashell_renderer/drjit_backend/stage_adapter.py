@@ -68,6 +68,7 @@ def build_fastpath_pipeline(config: RendererConfig) -> RendererPipeline:
             field_model=field,
             alpha_mode="pred_gradient",
             white_background=config.render.white_background,
+            freeze=bool(config.render.freeze_field),
             profile_geo=bool(config.profiling.geo_island_profile),
             prewarm=bool(config.profiling.geo_island_prewarm),
         ),

@@ -126,8 +126,9 @@ def test_builder_constructs_only_runtime_dependencies(monkeypatch):
         events.append("sampler")
         return sampler
 
-    def make_island(*, field_model, alpha_mode, white_background, profile_geo, prewarm):
+    def make_island(*, field_model, alpha_mode, white_background, profile_geo, prewarm, freeze):
         assert field_model is field
+        assert freeze is True
         assert alpha_mode == "pred_gradient"
         events.append("island")
         return island
