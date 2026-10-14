@@ -157,3 +157,17 @@ def test_builder_constructs_only_runtime_dependencies(monkeypatch):
     assert pipeline.field_island is island
     assert events == ["tracer", "checkpoint", "sampler", "island"]
     assert pipeline.collect_stats is False
+
+
+def test_before_field_runs_between_sampling_and_field():
+    events = []
+    hits = SimpleNamespace(metadata={"optix_sample_counts": np.asarray([1])})
+    packed = SimpleNamespace(valid_samples=1, metadata={})
+    result = SimpleNamespace(metadata={}, diagnostics={})
+    pipeline = RendererPipeline(
+        SimpleNamespace(trace=lambda rays: events.append("trace") or hits),
+        SimpleNamespace(sample=lambda rays, hits: events.append("sample") or packed),
+        SimpleNamespace(render_rgb_buffer=lambda *args, **kwargs: events.append("field") or result),
+    )
+    pipeline.run_render_buffer(SimpleNamespace(num_rays=1, metadata={}), before_field=lambda: events.append("before_field"))
+    assert events == ["trace", "sample", "before_field", "field"]

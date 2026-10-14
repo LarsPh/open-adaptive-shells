@@ -52,7 +52,7 @@ class FakeInterop:
 def test_direct_presenter_dispatch_and_range_reupload(monkeypatch, mode, expected):
     gl, ext = FakeGl(), FakeInterop()
     presenter = CudaGlPresenter(gl, ext)
-    monkeypatch.setattr(CudaGlPresenter, "_dr_arrays_to_cupy", lambda self, *xs: tuple(SimpleNamespace(data=SimpleNamespace(ptr=x)) for x in xs))
+    monkeypatch.setattr(CudaGlPresenter, "_dr_arrays_to_cupy", lambda self, *xs, wait=True: tuple(SimpleNamespace(data=SimpleNamespace(ptr=x)) for x in xs))
     buffer = DrRenderBuffer((100, 200, 300), 4, 2, 2, diagnostics={"sample_count": 400, "pred_gradient_norm": 500, "pred_normal": (600, 700, 800)})
     result = ViewerRenderFrame(SimpleNamespace(width=2, height=2), {}, {}, 0.0, buffer)
     presenter.upload(result, mode, (0.0, 1.0))

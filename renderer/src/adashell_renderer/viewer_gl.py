@@ -152,14 +152,15 @@ class CudaGlPresenter:
         self.gl.glBindBuffer(self.gl.GL_PIXEL_UNPACK_BUFFER, 0)
         self.cuda_handle = int(self.ext.register_pbo(int(self.pbo_id)))
 
-    def _dr_arrays_to_cupy(self, *arrays: Any) -> tuple[Any, ...]:
+    def _dr_arrays_to_cupy(self, *arrays: Any, wait: bool = True) -> tuple[Any, ...]:
         import cupy as cp  # type: ignore[import-not-found]
         import drjit as dr  # type: ignore[import-not-found]
 
         live_arrays = tuple(array for array in arrays if array is not None)
         if live_arrays:
             dr.eval(*live_arrays)
-            dr.sync_thread()
+            if wait:
+                dr.sync_thread()
         cupy_arrays = tuple(cp.from_dlpack(array) for array in arrays)
         for array in cupy_arrays:
             if array.dtype != cp.float32:
@@ -177,7 +178,13 @@ class CudaGlPresenter:
 
         return cp.zeros((int(total),), dtype=cp.float32)
 
-    def _upload_display_buffer(self, result: ViewerRenderFrame, mode: DisplayMode, value_range: tuple[float, float]) -> None:
+    def _upload_display_buffer(
+        self,
+        result: ViewerRenderFrame,
+        mode: DisplayMode,
+        value_range: tuple[float, float],
+        wait: bool = True,
+    ) -> None:
         buffer = result.display_buffer
         if buffer is None:
             raise ValueError("GL display requires a DrRenderBuffer.")
@@ -205,7 +212,7 @@ class CudaGlPresenter:
             if scalar is None:
                 keepalive = (self._zero_cupy_float_buffer(width * height),)
             else:
-                keepalive = self._dr_arrays_to_cupy(scalar)
+                keepalive = self._dr_arrays_to_cupy(scalar, wait=wait)
             result.details["display_dr_to_cupy_ms"] = (time.perf_counter() - dlpack_start) * 1000.0
             timings = self.ext.copy_scalar_ptr_to_pbo(
                 int(self.cuda_handle),
@@ -219,7 +226,7 @@ class CudaGlPresenter:
         elif mode in vector_modes:
             vector = buffer.diagnostics.get(mode)
             if isinstance(vector, tuple) and len(vector) == 3:
-                keepalive = self._dr_arrays_to_cupy(vector[0], vector[1], vector[2])
+                keepalive = self._dr_arrays_to_cupy(vector[0], vector[1], vector[2], wait=wait)
             else:
                 zero = self._zero_cupy_float_buffer(width * height)
                 keepalive = (zero, zero, zero)
@@ -234,7 +241,7 @@ class CudaGlPresenter:
                 True,
             )
         else:
-            r, g, b = self._dr_arrays_to_cupy(*buffer.rgb_channels)
+            r, g, b = self._dr_arrays_to_cupy(*buffer.rgb_channels, wait=wait)
             keepalive = (r, g, b)
             result.details["display_dr_to_cupy_ms"] = (time.perf_counter() - dlpack_start) * 1000.0
             timings = self.ext.copy_rgb_ptrs_to_pbo(
@@ -250,8 +257,19 @@ class CudaGlPresenter:
         self.timings.cuda_pack_ms = float(timings[1])
         self.timings.interop_unmap_ms = float(timings[2])
 
-    def upload(self, result: ViewerRenderFrame, mode: DisplayMode, value_range: tuple[float, float]) -> None:
-        self._upload_display_buffer(result, mode, value_range)
+    def upload(
+        self,
+        result: ViewerRenderFrame,
+        mode: DisplayMode,
+        value_range: tuple[float, float],
+        wait: bool = True,
+    ) -> None:
+        """Pack a frame into the PBO and texture.
+
+        `wait=False` skips the host wait for Dr.Jit; only pass it when the
+        caller has already synchronized past the frame's kernels.
+        """
+        self._upload_display_buffer(result, mode, value_range, wait=wait)
 
         tex_start = time.perf_counter()
         self.gl.glBindTexture(self.gl.GL_TEXTURE_2D, self.texture_id)
@@ -445,6 +463,8 @@ class GlViewerSession:
     sample_limit: int = field(init=False)
     camera_items: list[str] = field(init=False)
     last_result: ViewerRenderFrame | None = None
+    # Rendered but not yet shown; it is packed while the next frame renders.
+    pending: tuple[ViewerRenderFrame, DisplayMode] | None = None
     status: str = "warming up"
     timing_tree: str = "frame\n  render\n  display"
     last_loop_start: float = field(default_factory=time.perf_counter)
@@ -631,30 +651,44 @@ class GlViewerSession:
         imgui.end()
         return range_dirty
 
+    def _present(self, result: ViewerRenderFrame, mode: DisplayMode, *, wait: bool) -> None:
+        present_start = time.perf_counter()
+        self.presenter.upload(result, mode, self.ui_state.mode_range(mode), wait=wait)
+        self.presenter.timings.presenter_ms = (time.perf_counter() - present_start) * 1000.0
+        self.last_result = result
+
+    def _present_pending(self, *, wait: bool) -> None:
+        if self.pending is not None:
+            result, mode = self.pending
+            self.pending = None
+            self._present(result, mode, wait=wait)
+
     def _render_if_needed(self, range_dirty: bool) -> None:
+        """Render with one frame of latency so CPU and GPU work overlap.
+
+        Frame N is shown while frame N+1 renders: once N+1's sample count has
+        been read back, frame N's kernels are finished, so N is packed into the
+        PBO without a host wait and ahead of N+1's field kernels. The GL upload,
+        ImGui and swap that follow then run on the CPU while the GPU evaluates
+        frame N+1.
+        """
         state = self.state
         timings = self.presenter.timings
-        if state.dirty or state.continuous or self.last_result is None:
+        timings.presenter_ms = 0.0
+        if state.dirty or state.continuous or (self.last_result is None and self.pending is None):
             render_start = time.perf_counter()
-            result = render_viewer_frame(state)
-            timings.render_wall_ms = (time.perf_counter() - render_start) * 1000.0
-            present_start = time.perf_counter()
-            self.presenter.upload(result, state.display_mode, self.ui_state.mode_range(state.display_mode))
-            timings.presenter_ms = (time.perf_counter() - present_start) * 1000.0
-            self.last_result = result
+            result = render_viewer_frame(state, before_field=lambda: self._present_pending(wait=False))
+            _schedule_display_buffers(result.display_buffer)
+            timings.render_wall_ms = (time.perf_counter() - render_start) * 1000.0 - timings.presenter_ms
+            self.pending = (result, state.display_mode)
             state.dirty = False
-        elif range_dirty:
-            timings.render_wall_ms = 0.0
-            present_start = time.perf_counter()
-            self.presenter.upload(
-                self.last_result,
-                state.display_mode,
-                self.ui_state.mode_range(state.display_mode),
-            )
-            timings.presenter_ms = (time.perf_counter() - present_start) * 1000.0
         else:
             timings.render_wall_ms = 0.0
-            timings.presenter_ms = 0.0
+            if self.pending is not None:
+                # Nothing new to render: show the last frame now.
+                self._present_pending(wait=True)
+            elif range_dirty and self.last_result is not None:
+                self._present(self.last_result, state.display_mode, wait=True)
 
     def _draw_viewport(self) -> bool:
         imgui = self.imgui
@@ -719,6 +753,21 @@ class GlViewerSession:
         self.status = _status_line(self.state, self.presenter.timings)
         if self.presenter.timings.render_wall_ms > 0.0:
             self.timing_tree = _timing_tree(self.state, self.presenter.timings)
+
+
+def _schedule_display_buffers(buffer: DrRenderBuffer | None) -> None:
+    """Queue evaluation of every displayable output without waiting for it."""
+    if buffer is None:
+        return
+    import drjit as dr  # type: ignore[import-not-found]
+
+    arrays: list[Any] = [*buffer.rgb_channels, buffer.depth]
+    for value in buffer.diagnostics.values():
+        arrays.extend(value if isinstance(value, tuple) else (value,))
+    live = [array for array in arrays if array is not None]
+    if live:
+        dr.schedule(*live)
+        dr.eval()
 
 
 def run_gl_viewer(state: ViewerState, *, timing_debug: bool = False) -> None:

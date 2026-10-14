@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from adashell_renderer.drjit_backend.optix_metadata_sampler import OptixMetadataSamplerCore
 from adashell_renderer.profiling import ProfileBook
@@ -27,7 +27,20 @@ class RendererPipeline:
             raise TypeError("OptiX metadata sampling requires CuPy arrays.")
         return int(cp.asnumpy(cp.count_nonzero(sample_counts > 0)).item())
 
-    def run_render_buffer(self, rays: RayBatch, profile: ProfileBook | None = None) -> DrRenderBuffer:
+    def run_render_buffer(
+        self,
+        rays: RayBatch,
+        profile: ProfileBook | None = None,
+        before_field: Callable[[], None] | None = None,
+    ) -> DrRenderBuffer:
+        """Render one frame.
+
+        `before_field` runs after the sample count has been read back and before
+        the field kernels are submitted. That readback already waited for all
+        earlier GPU work, so the callback can consume the previous frame's
+        buffers without another host wait, and its GPU work runs ahead of this
+        frame's field network.
+        """
         pipeline_wall_start = time.perf_counter()
         profile = profile or ProfileBook()
         profile.set_counter("num_rays", rays.num_rays)
@@ -51,6 +64,9 @@ class RendererPipeline:
         packed.metadata["sample_budget"] = float(rays.num_rays) * budget_per_ray
         valid_samples = float(packed.metadata.get("valid_samples", packed.valid_samples))
         profile.set_counter("valid_samples", valid_samples)
+
+        if before_field is not None:
+            before_field()
 
         field_start = time.perf_counter()
         render_buffer = self.field_island.render_rgb_buffer(

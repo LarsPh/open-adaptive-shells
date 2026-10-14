@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Callable, Literal
 
 import numpy as np
 import torch
@@ -423,7 +423,7 @@ def apply_fastpath_viewer_defaults(
         apply_fastpath_defaults(config)
 
 
-def render_viewer_frame(state: ViewerState) -> ViewerRenderFrame:
+def render_viewer_frame(state: ViewerState, before_field: Callable[[], None] | None = None) -> ViewerRenderFrame:
     state.pipeline.fast_render_aux_outputs = state.display_mode == "depth"
     state.pipeline.fast_render_diagnostic_mode = diagnostic_mode_for_display(state.display_mode)
     frame_start = time.perf_counter()
@@ -445,6 +445,7 @@ def render_viewer_frame(state: ViewerState) -> ViewerRenderFrame:
     display_buffer, profile, details = render_full_image_buffer(
         pipeline=state.pipeline,
         rays=rays,
+        before_field=before_field,
     )
     render_done = time.perf_counter()
     render_full_image_ms = (render_done - wall_start) * 1000.0

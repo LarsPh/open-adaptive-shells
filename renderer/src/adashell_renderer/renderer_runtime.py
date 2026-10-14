@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from adashell_renderer.config import RendererConfig
 from adashell_renderer.drjit_backend.stage_adapter import build_fastpath_pipeline
@@ -99,10 +99,11 @@ def _collect_render_metadata(
 def render_full_image_buffer(
     pipeline: RendererPipeline,
     rays: RayBatch,
+    before_field: Callable[[], None] | None = None,
 ) -> tuple[DrRenderBuffer, dict[str, float], dict[str, object]]:
     full_start = time.perf_counter()
     profile = ProfileBook()
-    render_buffer = pipeline.run_render_buffer(rays, profile=profile)
+    render_buffer = pipeline.run_render_buffer(rays, profile=profile, before_field=before_field)
     profile_totals: dict[str, float] = {}
     detail_totals: dict[str, object] = {}
     _merge_profiles(profile_totals, render_buffer.metadata.get("profile", {}))
