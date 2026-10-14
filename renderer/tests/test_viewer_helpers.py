@@ -392,46 +392,52 @@ def _make_gl_viewer_session(*, dirty: bool = True, continuous: bool = False, img
     return session, state, presenter, camera
 
 
-def test_gl_viewer_session_shows_each_frame_while_the_next_one_renders(monkeypatch) -> None:
-    rendered = [SimpleNamespace(display_buffer=None) for _ in range(2)]
-    events: list[object] = []
+def test_gl_viewer_session_keeps_one_frame_queued_behind_the_display(monkeypatch) -> None:
+    events: list[tuple[str, int]] = []
+    results: list[SimpleNamespace] = []
 
-    def fake_render(state, before_field=None):  # noqa: ANN001
+    def fake_prepare(state):  # noqa: ANN001
+        index = sum(name == "prepare" for name, _ in events)
+        events.append(("prepare", index))
+        return SimpleNamespace(index=index, display_mode=state.display_mode)
+
+    def fake_finish(state, prepared, before_field=None):  # noqa: ANN001
         # The pipeline calls before_field after the sample readback, before the field kernels.
         before_field()
-        events.append(("field", len([e for e in events if e[0] == "field"])))
-        return rendered[len([e for e in events if e[0] == "field"]) - 1]
+        events.append(("field", prepared.index))
+        results.append(SimpleNamespace(display_buffer=None, index=prepared.index))
+        return results[-1]
 
-    monkeypatch.setattr(viewer_gl_module, "render_viewer_frame", fake_render)
-    session, state, presenter, _camera = _make_gl_viewer_session()
+    monkeypatch.setattr(viewer_gl_module, "prepare_viewer_frame", fake_prepare)
+    monkeypatch.setattr(viewer_gl_module, "finish_viewer_frame", fake_finish)
+    session, state, presenter, _camera = _make_gl_viewer_session(continuous=True)
 
     session._render_if_needed(range_dirty=False)
+    assert events == [("prepare", 0)]
+    session._render_if_needed(range_dirty=False)
+    # Frame 0 is evaluated and frame 1 is queued behind it; nothing is shown yet.
+    assert events[1:] == [("field", 0), ("prepare", 1)]
     assert presenter.uploads == []
-    assert session.pending == (rendered[0], "RGB")
-    assert state.dirty is False
-
-    state.continuous = True
     session._render_if_needed(range_dirty=False)
-    # Frame 0 is packed without a host wait, inside frame 1's render, before its field kernels.
-    assert presenter.uploads == [(rendered[0], "RGB", (0.0, 1.0))]
+    # Frame 0 is packed without a host wait before frame 1's field kernels.
+    assert presenter.uploads == [(results[0], "RGB", (0.0, 1.0))]
     assert presenter.waits == [False]
-    assert session.last_result is rendered[0]
-    assert session.pending == (rendered[1], "RGB")
+    assert events[3:] == [("field", 1), ("prepare", 2)]
 
     state.continuous = False
     session._render_if_needed(range_dirty=False)
-    # With nothing new to render, the pending frame is shown at once and waits for its kernels.
-    assert presenter.uploads[-1][0] is rendered[1]
-    assert presenter.waits[-1] is True
-    assert session.pending is None
-    assert len([e for e in events if e[0] == "field"]) == 2
+    # The last queued frame finishes, and with nothing new to render it is shown at once.
+    assert events[5:] == [("field", 2)]
+    assert [upload[0] for upload in presenter.uploads] == [results[0], results[1], results[2]]
+    assert presenter.waits == [False, False, True]
+    assert session.inflight is None and session.pending is None
 
 
 def test_gl_viewer_session_reuses_last_result_for_range_only_update(monkeypatch) -> None:
     monkeypatch.setattr(
         viewer_gl_module,
-        "render_viewer_frame",
-        lambda _state, before_field=None: pytest.fail("range-only update must not render"),
+        "prepare_viewer_frame",
+        lambda _state: pytest.fail("range-only update must not render"),
     )
     session, _state, presenter, _camera = _make_gl_viewer_session(dirty=False)
     previous = object()
@@ -446,8 +452,8 @@ def test_gl_viewer_session_reuses_last_result_for_range_only_update(monkeypatch)
 def test_gl_viewer_session_idle_frame_clears_render_timings(monkeypatch) -> None:
     monkeypatch.setattr(
         viewer_gl_module,
-        "render_viewer_frame",
-        lambda _state, before_field=None: pytest.fail("idle update must not render"),
+        "prepare_viewer_frame",
+        lambda _state: pytest.fail("idle update must not render"),
     )
     session, _state, presenter, _camera = _make_gl_viewer_session(dirty=False)
     session.last_result = object()

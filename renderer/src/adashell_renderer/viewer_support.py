@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import torch
@@ -423,9 +423,21 @@ def apply_fastpath_viewer_defaults(
         apply_fastpath_defaults(config)
 
 
-def render_viewer_frame(state: ViewerState, before_field: Callable[[], None] | None = None) -> ViewerRenderFrame:
-    state.pipeline.fast_render_aux_outputs = state.display_mode == "depth"
-    state.pipeline.fast_render_diagnostic_mode = diagnostic_mode_for_display(state.display_mode)
+@dataclass(slots=True)
+class PreparedViewerFrame:
+    """Rays generated and the shell trace launched; the rest of the frame is pending."""
+
+    frame: CameraPathFrame
+    rays: Any
+    trace_hits: Any
+    display_mode: DisplayMode
+    frame_ms: float
+    rays_ms: float
+    trace_ms: float
+
+
+def prepare_viewer_frame(state: ViewerState) -> PreparedViewerFrame:
+    """Generate rays and launch the trace for the current camera, without waiting for the GPU."""
     frame_start = time.perf_counter()
     frame = state.camera.to_frame(state.resolution_scale)
     state.last_render_frame = frame
@@ -440,31 +452,51 @@ def render_viewer_frame(state: ViewerState, before_field: Callable[[], None] | N
         pixel_center_offset=state.config.render.pixel_center_offset,
     )
     rays_ms = (time.perf_counter() - rays_start) * 1000.0
+    trace_start = time.perf_counter()
+    trace_hits = state.pipeline.trace_stage.trace(rays)
+    trace_ms = (time.perf_counter() - trace_start) * 1000.0
+    return PreparedViewerFrame(frame, rays, trace_hits, state.display_mode, frame_ms, rays_ms, trace_ms)
 
+
+def finish_viewer_frame(
+    state: ViewerState,
+    prepared: PreparedViewerFrame,
+    before_field: Callable[[], None] | None = None,
+) -> ViewerRenderFrame:
+    """Sample and submit the field network for a prepared frame."""
+    state.pipeline.fast_render_aux_outputs = prepared.display_mode == "depth"
+    state.pipeline.fast_render_diagnostic_mode = diagnostic_mode_for_display(prepared.display_mode)
+    rays = prepared.rays
     wall_start = time.perf_counter()
     display_buffer, profile, details = render_full_image_buffer(
         pipeline=state.pipeline,
         rays=rays,
         before_field=before_field,
+        trace_hits=prepared.trace_hits,
+        trace_ms=prepared.trace_ms,
     )
     render_done = time.perf_counter()
-    render_full_image_ms = (render_done - wall_start) * 1000.0
-    details["viewer_frame_ms"] = frame_ms
-    details["viewer_generate_rays_ms"] = rays_ms
+    render_full_image_ms = (render_done - wall_start) * 1000.0 + prepared.trace_ms
+    details["viewer_frame_ms"] = prepared.frame_ms
+    details["viewer_generate_rays_ms"] = prepared.rays_ms
     for key, value in rays.metadata.items():
         if key.startswith("raygen_"):
             details[key] = value
     details["viewer_render_full_image_ms"] = render_full_image_ms
-    details["viewer_render_wall_ms"] = frame_ms + rays_ms + render_full_image_ms
+    details["viewer_render_wall_ms"] = prepared.frame_ms + prepared.rays_ms + render_full_image_ms
     details["viewer_render_profile_gap_ms"] = details["viewer_render_wall_ms"] - _profile_total_ms(profile)
     state.profile = profile
     state.details = details
     state.timings.core_ms = _profile_total_ms(profile)
     state.timings.total_wall_ms = float(details["viewer_render_wall_ms"])
     return ViewerRenderFrame(
-        frame=frame,
+        frame=prepared.frame,
         profile=profile,
         details=details,
         wall_ms=state.timings.total_wall_ms,
         display_buffer=display_buffer,
     )
+
+
+def render_viewer_frame(state: ViewerState, before_field: Callable[[], None] | None = None) -> ViewerRenderFrame:
+    return finish_viewer_frame(state, prepare_viewer_frame(state), before_field)

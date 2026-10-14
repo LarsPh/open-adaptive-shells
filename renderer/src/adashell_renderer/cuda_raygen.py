@@ -140,7 +140,8 @@ def generate_rays_cupy(
                 np.float32(t_far),
             ),
         )
-        cp.cuda.get_current_stream().synchronize()
+        # No host wait: the trace runs on the same stream, and in the viewer the
+        # GPU may still be busy with the previous frame.
         launch_ms = (time.perf_counter() - launch_start) * 1000.0
 
     metadata: dict[str, object] = {

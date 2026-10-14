@@ -32,8 +32,13 @@ class RendererPipeline:
         rays: RayBatch,
         profile: ProfileBook | None = None,
         before_field: Callable[[], None] | None = None,
+        trace_hits: TraceHitBuffers | None = None,
+        trace_ms: float = 0.0,
     ) -> DrRenderBuffer:
         """Render one frame.
+
+        `trace_hits` lets a caller launch the trace earlier, from `trace()`;
+        `trace_ms` is then its launch time for the profile.
 
         `before_field` runs after the sample count has been read back and before
         the field kernels are submitted. That readback already waited for all
@@ -45,8 +50,11 @@ class RendererPipeline:
         profile = profile or ProfileBook()
         profile.set_counter("num_rays", rays.num_rays)
 
-        with profile.time("trace_ms"):
-            trace_hits = self.trace_stage.trace(rays)
+        if trace_hits is None:
+            with profile.time("trace_ms"):
+                trace_hits = self.trace_stage.trace(rays)
+        else:
+            profile.add_time_ms("trace_ms", trace_ms)
         # Counting reads back to the host, so it waits for the trace; only stats mode pays for it.
         active_ray_count = self._count_active_metadata_rays(trace_hits) if self.collect_stats else None
         if active_ray_count is not None:

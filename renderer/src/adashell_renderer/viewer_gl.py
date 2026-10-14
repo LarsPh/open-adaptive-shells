@@ -17,13 +17,15 @@ from adashell_renderer.renderer_runtime import build_runtime_pipeline
 from adashell_renderer.types import DrRenderBuffer
 from adashell_renderer.viewer_support import (
     DisplayMode,
+    PreparedViewerFrame,
     ViewerRenderFrame,
     ViewerState,
     _field_aabb_from_pipeline,
     apply_fastpath_viewer_defaults,
+    finish_viewer_frame,
     load_shell_mesh_bounds,
+    prepare_viewer_frame,
     project_debug_bounds_overlay_lines,
-    render_viewer_frame,
 )
 
 
@@ -465,6 +467,8 @@ class GlViewerSession:
     last_result: ViewerRenderFrame | None = None
     # Rendered but not yet shown; it is packed while the next frame renders.
     pending: tuple[ViewerRenderFrame, DisplayMode] | None = None
+    # Rays generated and trace launched; sampled and evaluated next loop.
+    inflight: PreparedViewerFrame | None = None
     status: str = "warming up"
     timing_tree: str = "frame\n  render\n  display"
     last_loop_start: float = field(default_factory=time.perf_counter)
@@ -664,28 +668,37 @@ class GlViewerSession:
             self._present(result, mode, wait=wait)
 
     def _render_if_needed(self, range_dirty: bool) -> None:
-        """Render with one frame of latency so CPU and GPU work overlap.
+        """Keep the GPU queue full across loop iterations.
 
-        Frame N is shown while frame N+1 renders: once N+1's sample count has
-        been read back, frame N's kernels are finished, so N is packed into the
-        PBO without a host wait and ahead of N+1's field kernels. The GL upload,
-        ImGui and swap that follow then run on the CPU while the GPU evaluates
-        frame N+1.
+        Each iteration finishes the frame launched in the previous one: reading
+        back its sample count waits for the earlier field kernels, so the frame
+        before it is packed into the PBO without a host wait, ahead of this
+        frame's field kernels. The next frame's rays and trace are then queued
+        behind those kernels before the GL upload, ImGui and swap run on the
+        CPU. A frame reaches the screen two iterations after its camera was read.
         """
         state = self.state
         timings = self.presenter.timings
         timings.presenter_ms = 0.0
-        if state.dirty or state.continuous or (self.last_result is None and self.pending is None):
-            render_start = time.perf_counter()
-            result = render_viewer_frame(state, before_field=lambda: self._present_pending(wait=False))
+        render_start = time.perf_counter()
+        finished = False
+        if self.inflight is not None:
+            prepared, self.inflight = self.inflight, None
+            result = finish_viewer_frame(state, prepared, before_field=lambda: self._present_pending(wait=False))
             _schedule_display_buffers(result.display_buffer)
-            timings.render_wall_ms = (time.perf_counter() - render_start) * 1000.0 - timings.presenter_ms
-            self.pending = (result, state.display_mode)
+            self.pending = (result, prepared.display_mode)
+            finished = True
+        wants_frame = state.dirty or state.continuous or (self.last_result is None and self.pending is None)
+        if wants_frame:
+            self.inflight = prepare_viewer_frame(state)
             state.dirty = False
+        if finished or wants_frame:
+            timings.render_wall_ms = (time.perf_counter() - render_start) * 1000.0 - timings.presenter_ms
         else:
             timings.render_wall_ms = 0.0
+        if not wants_frame and self.inflight is None:
+            # Nothing new is coming: show the last frame now.
             if self.pending is not None:
-                # Nothing new to render: show the last frame now.
                 self._present_pending(wait=True)
             elif range_dirty and self.last_result is not None:
                 self._present(self.last_result, state.display_mode, wait=True)

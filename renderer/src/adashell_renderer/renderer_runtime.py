@@ -100,10 +100,14 @@ def render_full_image_buffer(
     pipeline: RendererPipeline,
     rays: RayBatch,
     before_field: Callable[[], None] | None = None,
+    trace_hits: Any = None,
+    trace_ms: float = 0.0,
 ) -> tuple[DrRenderBuffer, dict[str, float], dict[str, object]]:
     full_start = time.perf_counter()
     profile = ProfileBook()
-    render_buffer = pipeline.run_render_buffer(rays, profile=profile, before_field=before_field)
+    render_buffer = pipeline.run_render_buffer(
+        rays, profile=profile, before_field=before_field, trace_hits=trace_hits, trace_ms=trace_ms,
+    )
     profile_totals: dict[str, float] = {}
     detail_totals: dict[str, object] = {}
     _merge_profiles(profile_totals, render_buffer.metadata.get("profile", {}))
