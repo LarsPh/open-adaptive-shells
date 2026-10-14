@@ -30,6 +30,17 @@ static __forceinline__ __device__ unsigned int interval_sample_count(const float
     return (unsigned int)n_samples;
 }
 
+// Closest hit along [tmin, tmax]: returns t (-1 on miss) and the hit flag
+// (1 = front face, 2 = back face) through `flag`.
+static __forceinline__ __device__ float trace_closest(OptixTraversableHandle handle, const float3 o, const float3 d,
+                                                     const float tmin, const float tmax, unsigned int& flag) {
+    unsigned int p0 = __float_as_uint(-1.0f);
+    unsigned int p1 = 0u;
+    optixTrace(handle, o, d, tmin, tmax, 0.0f, 255, OPTIX_RAY_FLAG_DISABLE_ANYHIT, 0, 1, 0, p0, p1);
+    flag = p1;
+    return __uint_as_float(p0);
+}
+
 struct Params {
     unsigned long long depth_buffer;
     unsigned long long hit_t_buffer;
@@ -123,24 +134,16 @@ extern "C" __global__ void __raygen__rg() {
         return;
     }
 
-    unsigned int p0 = __float_as_uint(-1.0f);
-    unsigned int p1 = 0u;
-    optixTrace(
-        params.erosion_trav_handle,
-        ray_o,
-        ray_d,
-        current_tmin,
-        ray_tmax,
-        0.0f,
-        255,
-        OPTIX_RAY_FLAG_DISABLE_ANYHIT,
-        0,
-        1,
-        0,
-        p0,
-        p1
-    );
-    float erosion_t = __uint_as_float(p0);
+    // Trace the outer shell first. Most rays miss it, and a ray that misses the
+    // outer shell cannot reach the inner shell nested inside it, so only rays
+    // with an outer hit pay for the inner-shell trace.
+    unsigned int first_flag = 0u;
+    const float first_t = trace_closest(params.dilation_trav_handle, ray_o, ray_d, current_tmin, ray_tmax, first_flag);
+    float erosion_t = -1.0f;
+    if (first_t >= 0.0f) {
+        unsigned int unused_flag = 0u;
+        erosion_t = trace_closest(params.erosion_trav_handle, ray_o, ray_d, current_tmin, ray_tmax, unused_flag);
+    }
     erosion_first_t[ray_idx] = erosion_t;
 
     // Hits past the inner shell can only close an interval at erosion_t, so
@@ -150,24 +153,8 @@ extern "C" __global__ void __raygen__rg() {
     bool passed_inner = false;
     unsigned int count = 0;
     for (unsigned int i = 0; i < params.max_hits; i++) {
-        p0 = __float_as_uint(-1.0f);
-        p1 = 0u;
-        optixTrace(
-            params.dilation_trav_handle,
-            ray_o,
-            ray_d,
-            current_tmin,
-            ray_tmax,
-            0.0f,
-            255,
-            OPTIX_RAY_FLAG_DISABLE_ANYHIT,
-            0,
-            1,
-            0,
-            p0,
-            p1
-        );
-        float t = __uint_as_float(p0);
+        unsigned int flag = first_flag;
+        const float t = i == 0 ? first_t : trace_closest(params.dilation_trav_handle, ray_o, ray_d, current_tmin, ray_tmax, flag);
         if (t < 0.0f) {
             break;
         }
@@ -175,7 +162,7 @@ extern "C" __global__ void __raygen__rg() {
         if (i == 0) {
             depth[ray_idx] = t;
         }
-        dilation_hit_flag[hit_buffer_base + i] = p1;
+        dilation_hit_flag[hit_buffer_base + i] = flag;
         ++count;
         if (has_inner && t > erosion_t) {
             passed_inner = true;
