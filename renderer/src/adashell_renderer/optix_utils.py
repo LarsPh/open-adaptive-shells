@@ -177,6 +177,25 @@ def _create_launch_params(
     return launch_params
 
 
+_SCRATCH_TRACE_BUFFERS: dict[tuple[int, int, int, int], tuple[Any, Any, Any, Any]] = {}
+
+
+def _scratch_trace_buffers(cp: Any, num_rays: int, max_hits: int, max_intervals: int) -> tuple[Any, Any, Any, Any]:
+    key = (cp.cuda.runtime.getDevice(), num_rays, max_hits, max_intervals)
+    buffers = _SCRATCH_TRACE_BUFFERS.get(key)
+    if buffers is None:
+        # Keep only the latest shape so resizing the viewer does not accumulate memory.
+        _SCRATCH_TRACE_BUFFERS.clear()
+        buffers = (
+            cp.empty((num_rays, max_hits), dtype=np.float32),
+            cp.empty((num_rays, max_hits), dtype=np.int32),
+            cp.empty((num_rays, max_intervals), dtype=np.float32),
+            cp.empty((num_rays, max_intervals), dtype=np.float32),
+        )
+        _SCRATCH_TRACE_BUFFERS[key] = buffers
+    return buffers
+
+
 def launch_pipeline_ray_batch(
     pipeline: Any,
     sbt: Any,
@@ -205,14 +224,17 @@ def launch_pipeline_ray_batch(
     ray_tmaxs_gpu = _to_cupy_array(cp, ray_tmaxs, shape=(num_rays,), name="t_far")
     input_prep_ms = (time.perf_counter() - input_prep_t0) * 1000.0
 
-    depth_buffer = -1 * cp.ones((num_rays,), dtype=np.float32)
-    hit_t_buffer = -1 * cp.ones((num_rays, n_depth_peeling_max), dtype=np.float32)
+    # The raygen program reads hit and interval slots only below the counts it
+    # wrote this launch, so the large per-hit buffers need no initialization
+    # and are reused across frames. Depth and the inner hit are skipped on
+    # early-out rays and keep their -1 default.
+    depth_buffer = cp.full((num_rays,), -1.0, dtype=np.float32)
+    erosion_first_t_buffer = cp.full((num_rays,), -1.0, dtype=np.float32)
     hit_count_buffer = cp.zeros((num_rays,), dtype=np.int32)
-    erosion_first_t_buffer = -1 * cp.ones((num_rays,), dtype=np.float32)
-    dilation_hit_flag_buffer = cp.zeros((num_rays, n_depth_peeling_max), dtype=np.int32)
     max_intervals = (int(n_depth_peeling_max) + 1) // 2
-    interval_start_buffer = -1 * cp.ones((num_rays, max_intervals), dtype=np.float32)
-    interval_end_buffer = -1 * cp.ones((num_rays, max_intervals), dtype=np.float32)
+    hit_t_buffer, dilation_hit_flag_buffer, interval_start_buffer, interval_end_buffer = _scratch_trace_buffers(
+        cp, num_rays, int(n_depth_peeling_max), max_intervals,
+    )
     interval_count_buffer = cp.zeros((num_rays,), dtype=np.int32)
     sample_count_buffer = cp.zeros((num_rays,), dtype=np.int32)
     launch_params = _create_launch_params(
