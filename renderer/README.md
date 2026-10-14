@@ -51,8 +51,8 @@ The viewer supports orbit and free-look navigation, with selectable diagnostic v
 
 ## Performance
 
-Khady averages **8.3 ms** per frame for core rendering at **1920 x 1080** on
-an RTX 5090, excluding ray generation and display.
+Khady takes **1.18 ms** per frame for core rendering at **1920 x 1080** on an
+RTX 5090 and **3.75 ms** on an RTX 4060 Ti, excluding ray generation and display.
 See [Performance](docs/performance.md) for measurements and the benchmark command.
 
 ## Development

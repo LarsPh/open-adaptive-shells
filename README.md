@@ -9,9 +9,9 @@ and GPU rendering in an interactive viewer.
 
 [Video](renderer/docs/media/viewer-demo.mp4)
 
-**1920 x 1080 · 8.3 ms core rendering · RTX 5090**
+**1920 x 1080 · 1.18 ms on RTX 5090 · 3.75 ms on RTX 4060 Ti**
 
-Khady average, excluding ray generation and display.
+Khady core rendering, median per frame, excluding ray generation and display.
 See [Performance](renderer/docs/performance.md) for measurements.
 
 ## Overview
