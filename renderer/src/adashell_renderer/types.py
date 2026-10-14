@@ -48,7 +48,7 @@ class IntervalPack:
     - `ends`:        `(N,)`
     - `eval_t`:      `(N,)`
     - `ray_indices`: `(N,)`
-    - `packed_info`: `(R, 2)`
+    - `ray_offsets`, `ray_sample_counts`: `(R,)`; `packed_info` stacks them as `(R, 2)`
 
     Meaning:
     - `N = valid_samples`: total number of valid samples across all active rays
@@ -76,8 +76,18 @@ class IntervalPack:
     ends: Tensor
     eval_t: Tensor
     ray_indices: Tensor
-    packed_info: Tensor
+    ray_offsets: Tensor
+    ray_sample_counts: Tensor
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def packed_info(self) -> Tensor:
+        # Built on request: the render path reads the two columns directly,
+        # so it does not pay for an (R, 2) copy every frame.
+        import cupy as cp  # type: ignore[import-not-found]
+
+        stack = cp.stack if isinstance(self.ray_offsets, cp.ndarray) else _numpy_stack
+        return stack((self.ray_offsets, self.ray_sample_counts), axis=-1)
 
     @property
     def valid_samples(self) -> int:
@@ -85,7 +95,13 @@ class IntervalPack:
 
     @property
     def num_rays(self) -> int:
-        return int(self.packed_info.shape[0])
+        return int(self.ray_offsets.shape[0])
+
+
+def _numpy_stack(arrays: tuple[Any, ...], axis: int) -> Any:
+    import numpy as np
+
+    return np.stack(arrays, axis=axis)
 
 
 @dataclass(slots=True)

@@ -270,7 +270,6 @@ class OptixMetadataSamplerCore:
         )
         flat_fill_ms = (time.perf_counter() - fill_start) * 1000.0
         packed_valid_samples = int(flat_starts.shape[0])
-        packed_info = cp.stack((ray_offsets, optix_sample_counts), axis=-1).astype(cp.int32, copy=False)
 
         dr = self._interop.dr
         history_start = len(dr.kernel_history()) if self.capture_kernel_history else 0
@@ -281,8 +280,9 @@ class OptixMetadataSamplerCore:
             flat_starts_dr = dr.cuda.Float(flat_starts)
             flat_ends_dr = dr.cuda.Float(flat_ends)
             flat_eval_t_dr = dr.cuda.Float(flat_eval_t)
-            flat_ray_indices_dr = dr.cuda.UInt(flat_ray_indices_i32)
-            ray_offsets_dr = dr.cuda.UInt(ray_offsets)
+            # Indices and offsets are non-negative; uint32 views import without a conversion copy.
+            flat_ray_indices_dr = dr.cuda.UInt(flat_ray_indices_i32.view(cp.uint32))
+            ray_offsets_dr = dr.cuda.UInt(ray_offsets.view(cp.uint32))
             build_dr_ms = (time.perf_counter() - build_dr_start) * 1000.0
             eval_start = time.perf_counter()
             dr.eval(
@@ -329,7 +329,8 @@ class OptixMetadataSamplerCore:
             ends=flat_ends,
             eval_t=flat_eval_t,
             ray_indices=flat_ray_indices_i32,
-            packed_info=packed_info,
+            ray_offsets=ray_offsets,
+            ray_sample_counts=optix_sample_counts,
             metadata={
                 **packed_meta,
                 "num_rays": float(n_rays),
