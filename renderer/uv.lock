@@ -49,7 +49,7 @@ viewer-gl = [
 [package.metadata]
 requires-dist = [
     { name = "cupy-cuda12x", specifier = "==14.0.1" },
-    { name = "drjit", specifier = "==1.3.1" },
+    { name = "drjit", specifier = "==1.5.0" },
     { name = "glfw", marker = "extra == 'viewer-gl'", specifier = ">=2.8" },
     { name = "imgui", extras = ["glfw"], marker = "extra == 'viewer-gl'", specifier = ">=2.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
@@ -160,14 +160,14 @@ wheels = [
 
 [[package]]
 name = "drjit"
-version = "1.3.1"
+version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/ea/b5926c4f057f6996da709edf3e43d89552cebc8765a19f2ba57b90bb041c/drjit-1.3.1-cp310-cp310-win_amd64.whl", hash = "sha256:1957d9d247740d4cf1777a13cdc95613d08f67c1f63090b1e19384061f3182d3", size = 4091528, upload-time = "2026-02-23T09:02:20.902Z" },
-    { url = "https://files.pythonhosted.org/packages/dd/20/f71d81a7e33925a9e63e2d612b10b0b77edbc7cb0dfa4b823645c7aa96db/drjit-1.3.1-cp312-abi3-win_amd64.whl", hash = "sha256:d667ae91a390ecb04a69071a18641b2b5e583cbcab1b67a03ff69565bf7a89f5", size = 4099930, upload-time = "2026-02-23T09:02:31.803Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/d7/008c3559a2dcde3f0d53655b652ec30732ccd0d9dfda1125a9cfff22a459/drjit-1.5.0-cp310-cp310-win_amd64.whl", hash = "sha256:0eece3c442561c853d3046736c9d6b055407c5e04e787a0e2191da9ff7dbc658", size = 4260514, upload-time = "2026-08-07T07:15:38.062Z" },
+    { url = "https://files.pythonhosted.org/packages/32/0c/71430c6cee74e04ee15cd9f434d70da00766a340735629f2387cefeddf12/drjit-1.5.0-cp312-abi3-win_amd64.whl", hash = "sha256:3b26bdc2aa2ff2aad9a3d8ea11f6516f3d49d9269f8daab37ba9ca1eefb39d0f", size = 4260090, upload-time = "2026-08-07T07:15:49.765Z" },
 ]
 
 [[package]]
@@ -689,7 +689,7 @@ name = "tinycudann"
 version = "2.0"
 source = { path = "dist/wheels/tinycudann-2.0-cp310-cp310-win_amd64.whl" }
 wheels = [
-    { filename = "tinycudann-2.0-cp310-cp310-win_amd64.whl", hash = "sha256:47ea4dc88293b3b5d594ccf8940d638b2e83a820a5fd6ec1387666cb913c68ad" },
+    { filename = "tinycudann-2.0-cp310-cp310-win_amd64.whl", hash = "sha256:dc55a02f183b8412717813cd3a4b2d639b3588c75eae4f9c6a4a6e92c23aede1" },
 ]
 
 [[package]]

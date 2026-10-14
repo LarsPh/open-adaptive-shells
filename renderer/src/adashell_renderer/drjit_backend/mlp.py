@@ -118,13 +118,15 @@ class DrJitMLP:
             weight_t = spec.weight.to(device=device, dtype=torch.float16).contiguous()
             weight_dr = dr.cuda.TensorXf16(weight_t)
             if spec.bias is None:
-                buffer_dr, weight_view = dr.nn.pack(weight_dr, layout="inference")
-                packed_layers.append((buffer_dr, weight_view, None))
+                # Dr.Jit >= 1.4 returns only the packed views; the shared buffer
+                # is reachable through `view.buffer`.
+                weight_view = dr.nn.pack(weight_dr, layout="inference")
+                packed_layers.append((weight_view.buffer, weight_view, None))
             else:
                 bias_t = spec.bias.to(device=device, dtype=torch.float16).contiguous()
                 bias_dr = dr.cuda.TensorXf16(bias_t)
-                buffer_dr, weight_view, bias_view = dr.nn.pack(weight_dr, bias_dr, layout="inference")
-                packed_layers.append((buffer_dr, weight_view, bias_view))
+                weight_view, bias_view = dr.nn.pack(weight_dr, bias_dr, layout="inference")
+                packed_layers.append((weight_view.buffer, weight_view, bias_view))
         result = tuple(packed_layers)
         self._cached_dr_layers[key] = result
         return result
