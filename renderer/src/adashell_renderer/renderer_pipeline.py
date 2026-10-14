@@ -17,6 +17,7 @@ class RendererPipeline:
     field_island: Any
     fast_render_aux_outputs: bool = False
     fast_render_diagnostic_mode: str = "none"
+    collect_stats: bool = False
 
     def _count_active_metadata_rays(self, trace_hits: TraceHitBuffers) -> int:
         import cupy as cp  # type: ignore[import-not-found]
@@ -33,17 +34,20 @@ class RendererPipeline:
 
         with profile.time("trace_ms"):
             trace_hits = self.trace_stage.trace(rays)
-        active_ray_count = self._count_active_metadata_rays(trace_hits)
-        profile.set_counter("active_rays", float(active_ray_count))
+        # Counting reads back to the host, so it waits for the trace; only stats mode pays for it.
+        active_ray_count = self._count_active_metadata_rays(trace_hits) if self.collect_stats else None
+        if active_ray_count is not None:
+            profile.set_counter("active_rays", float(active_ray_count))
 
         sample_start = time.perf_counter()
         packed = self.sampler.sample(rays, trace_hits)
         sample_elapsed_ms = (time.perf_counter() - sample_start) * 1000.0
         profile.add_time_ms("sample_ms", sample_elapsed_ms)
         packed.metadata["source_num_rays"] = float(rays.num_rays)
-        packed.metadata["active_rays"] = float(active_ray_count)
         budget_per_ray = float(packed.metadata.get("budget_per_ray", 0.0))
-        packed.metadata["active_sample_budget"] = float(active_ray_count) * budget_per_ray
+        if active_ray_count is not None:
+            packed.metadata["active_rays"] = float(active_ray_count)
+            packed.metadata["active_sample_budget"] = float(active_ray_count) * budget_per_ray
         packed.metadata["sample_budget"] = float(rays.num_rays) * budget_per_ray
         valid_samples = float(packed.metadata.get("valid_samples", packed.valid_samples))
         profile.set_counter("valid_samples", valid_samples)

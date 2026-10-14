@@ -67,6 +67,8 @@ class ProfilingConfig:
     trace_blocking: bool = False
     geo_island_profile: bool = False
     geo_island_prewarm: bool = True
+    # Per-stage host waits and the active-ray count; off keeps the frame asynchronous.
+    render_stats: bool = False
 
 
 @dataclass(slots=True)

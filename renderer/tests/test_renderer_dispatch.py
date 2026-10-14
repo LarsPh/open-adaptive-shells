@@ -18,7 +18,8 @@ def fake_cupy(monkeypatch):
 
 
 @pytest.mark.parametrize("counts", ([2, 0, 1], [0, 0, 0]))
-def test_direct_dispatch_preserves_buffers_and_profile(counts):
+@pytest.mark.parametrize("collect_stats", (False, True))
+def test_direct_dispatch_preserves_buffers_and_profile(counts, collect_stats):
     events = []
     rays = SimpleNamespace(num_rays=3, metadata={"user": "keep"})
     original_metadata = dict(rays.metadata)
@@ -49,6 +50,7 @@ def test_direct_dispatch_preserves_buffers_and_profile(counts):
         SimpleNamespace(render_rgb_buffer=render),
         fast_render_aux_outputs=True,
         fast_render_diagnostic_mode="sample_count",
+        collect_stats=collect_stats,
     )
     profile = ProfileBook()
     assert pipeline.run_render_buffer(rays, profile) is result
@@ -57,9 +59,13 @@ def test_direct_dispatch_preserves_buffers_and_profile(counts):
     assert result.metadata["packed"] is packed.metadata
     assert result.metadata["trace"] is hits.metadata
     assert result.metadata["diagnostics"] is result.diagnostics
-    assert profile.counters == {"num_rays": 3.0, "active_rays": float(sum(c > 0 for c in counts)), "valid_samples": float(sum(counts))}
+    active = float(sum(c > 0 for c in counts))
+    expected = {"num_rays": 3.0, "valid_samples": float(sum(counts))}
+    if collect_stats:
+        expected["active_rays"] = active
+    assert profile.counters == expected
     assert packed.metadata["sample_budget"] == 24.0
-    assert packed.metadata["active_sample_budget"] == sum(c > 0 for c in counts) * 8.0
+    assert packed.metadata.get("active_sample_budget") == (active * 8.0 if collect_stats else None)
     assert set(profile.stage_ms) == {"trace_ms", "sample_ms", "field_island_ms", "pipeline_wall_ms"}
     assert result.metadata["profile_stage_ms"] == {"field_eval_ms": 2.0}
     assert not hasattr(pipeline, "run")
@@ -115,7 +121,8 @@ def test_builder_constructs_only_runtime_dependencies(monkeypatch):
         events.append("checkpoint")
         return field
 
-    def make_sampler(config, *, capture_kernel_history):
+    def make_sampler(config, *, capture_kernel_history, host_sync):
+        assert host_sync is False
         events.append("sampler")
         return sampler
 
@@ -148,3 +155,4 @@ def test_builder_constructs_only_runtime_dependencies(monkeypatch):
     assert pipeline.sampler is sampler
     assert pipeline.field_island is island
     assert events == ["tracer", "checkpoint", "sampler", "island"]
+    assert pipeline.collect_stats is False

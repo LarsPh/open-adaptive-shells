@@ -100,6 +100,7 @@ def _trace_metadata_flat_fill_cuda(
     n_sample_max: int,
     single_sample_threshold: float,
     sample_spacing: float,
+    host_sync: bool = True,
 ) -> tuple[Any, Any, Any, Any, dict[str, float]]:
     global _TRACE_METADATA_FLAT_FILL_KERNEL
     cp = _require_cupy()
@@ -159,9 +160,10 @@ def _trace_metadata_flat_fill_cuda(
             ),
         )
     profile["trace_metadata_cuda_launch_ms"] = (time.perf_counter() - launch_start) * 1000.0
-    sync_start = time.perf_counter()
-    stream.synchronize()
-    profile["trace_metadata_cuda_sync_ms"] = (time.perf_counter() - sync_start) * 1000.0
+    if host_sync:
+        sync_start = time.perf_counter()
+        stream.synchronize()
+        profile["trace_metadata_cuda_sync_ms"] = (time.perf_counter() - sync_start) * 1000.0
     return flat_starts, flat_ends, flat_eval_t, flat_ray_indices, profile
 
 
@@ -171,6 +173,7 @@ class OptixMetadataSamplerCore:
 
     trace_config: TraceConfig
     capture_kernel_history: bool = False
+    host_sync: bool = False
     _interop: DrJitInterop = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -219,8 +222,10 @@ class OptixMetadataSamplerCore:
         """Return CuPy float32 samples and int32 ray-major offsets/counts.
 
         The pack owns its CuPy arrays and the Dr.Jit views in `_drjit_cache`.
-        CUDA fill completes before Dr.Jit imports them; Dr.Jit evaluation is
-        synchronized before returning. No padded samples reach the field.
+        The fill runs on CuPy's legacy default stream and Dr.Jit on a blocking
+        stream, so Dr.Jit work is ordered after the fill without host waits.
+        `host_sync` adds them back so per-stage timings measure GPU work.
+        No padded samples reach the field.
         """
         required = (
             "optix_interval_starts",
@@ -261,6 +266,7 @@ class OptixMetadataSamplerCore:
             n_sample_max=n_sample_max,
             single_sample_threshold=float(self.trace_config.single_sample_threshold),
             sample_spacing=float(self.trace_config.sample_spacing),
+            host_sync=self.host_sync,
         )
         flat_fill_ms = (time.perf_counter() - fill_start) * 1000.0
         packed_valid_samples = int(flat_starts.shape[0])
@@ -288,9 +294,11 @@ class OptixMetadataSamplerCore:
                 ray_offsets_dr,
             )
             eval_ms = (time.perf_counter() - eval_start) * 1000.0
-            sync_start = time.perf_counter()
-            dr.sync_thread()
-            sync_ms = (time.perf_counter() - sync_start) * 1000.0
+            sync_ms = 0.0
+            if self.host_sync or self.capture_kernel_history:
+                sync_start = time.perf_counter()
+                dr.sync_thread()
+                sync_ms = (time.perf_counter() - sync_start) * 1000.0
             if self.capture_kernel_history:
                 kernel_summary = self._summarize_kernel_history(dr.kernel_history()[history_start:])
 

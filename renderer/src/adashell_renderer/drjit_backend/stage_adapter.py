@@ -57,11 +57,13 @@ def build_fastpath_pipeline(config: RendererConfig) -> RendererPipeline:
     sampler_core = OptixMetadataSamplerCore(
         config.trace,
         capture_kernel_history=bool(config.profiling.drjit_kernel_history),
+        host_sync=bool(config.profiling.render_stats),
     )
     pipeline = RendererPipeline(
         trace_stage=tracer,
         sampler=sampler_core,
         fast_render_aux_outputs=False,
+        collect_stats=bool(config.profiling.render_stats),
         field_island=DrJitFieldIsland(
             field_model=field,
             alpha_mode="pred_gradient",

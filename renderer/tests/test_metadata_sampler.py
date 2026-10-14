@@ -54,8 +54,9 @@ def make_hits(counts):
 
 @pytest.mark.parametrize("counts", ([2, 0, 1], [0, 0, 0], []))
 @pytest.mark.parametrize("capture_history", (False, True))
-def test_sample_returns_owned_valid_only_pack(fake_backend, counts, capture_history):
-    sampler = sampler_module.OptixMetadataSamplerCore(TraceConfig(), capture_history)
+@pytest.mark.parametrize("host_sync", (False, True))
+def test_sample_returns_owned_valid_only_pack(fake_backend, counts, capture_history, host_sync):
+    sampler = sampler_module.OptixMetadataSamplerCore(TraceConfig(), capture_history, host_sync)
     rays = SimpleNamespace(num_rays=len(counts))
     hits = make_hits(counts)
     packed = sampler.sample(rays, hits)
@@ -72,7 +73,8 @@ def test_sample_returns_owned_valid_only_pack(fake_backend, counts, capture_hist
     np.testing.assert_array_equal(cache["ray_offsets"], packed.packed_info[:, 0])
     np.testing.assert_array_equal(cache["sample_counts"], counts)
     np.testing.assert_array_equal(cache["deltas"], packed.ends - packed.starts)
-    assert fake_backend == ["fill", "eval", "sync"]
+    # Rendering stays asynchronous unless stats or kernel history ask for host waits.
+    assert fake_backend == ["fill", "eval"] + (["sync"] if host_sync or capture_history else [])
     assert packed.metadata["trace_metadata_cuda_sync_ms"] == 0.25
     assert ("kernel_history_count" in packed.metadata) == capture_history
     assert not hasattr(sampler, "_cache")
