@@ -54,7 +54,7 @@ uncommitted build-file changes.
 | GPU architecture | `sm_120` / compute capability 12.0 |
 | NumPy | 2.2.6 |
 | CuPy | cupy-cuda12x 14.0.1 |
-| Dr.Jit | 1.3.1 |
+| Dr.Jit | 1.5.0 |
 | OptiX SDK | 7.6.0 |
 
 Other resolved versions are fixed in `uv.lock`. The native wheels have CPython

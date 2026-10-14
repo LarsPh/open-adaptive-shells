@@ -14,12 +14,13 @@ The local setup uses RTX 5090, CUDA Toolkit 12.8, OptiX SDK 7.6.0 and Visual Stu
 | Torch | 2.7.1+cu128 | 2.11.0+cu128 |
 | NumPy | 1.26.4 | 2.2.6 |
 | CuPy | 13.4.1 | 14.0.1 |
-| Dr.Jit | - | 1.3.1 |
+| Dr.Jit | - | 1.5.0 |
 
-Use Studio driver **596.36**. Driver **610.47** caused
-`Target architecture invalid` during Dr.Jit/OptiX PTX compilation on RTX 5090,
-with CoopVec matrix-vector operations and `ScatterReduceLocal` scatter reduction.
-Rolling back to 596.36 restored operation.
+Dr.Jit 1.3.1 failed with driver **610.47** (`Target architecture invalid`
+during OptiX PTX compilation of CoopVec matrix-vector operations combined with
+`ScatterReduceLocal` scatter reduction; [drjit#511](https://github.com/mitsuba-renderer/drjit/issues/511)).
+Dr.Jit 1.4.0 and later work around it, and the renderer now pins 1.5.0, which
+runs on 610.47.
 
 ## Native Sources
 

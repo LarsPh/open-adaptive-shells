@@ -69,8 +69,8 @@ to include the optional GPU tests.
 ### Compatibility
 
 - The current native wheels target Windows x64 and `sm_120`.
-- Use driver 596.36 Studio; see the [known driver issue](docs/windows-install.md#driver-compatibility)
-  with 610.47.
+- Dr.Jit 1.5.0 includes the workaround for the OptiX compile error seen with
+  Dr.Jit 1.3.1 on driver 610.47; see the [installation notes](../docs/installation.md).
 - Checkpoints must match the supported network topology and paired shell meshes.
 - Torch and tiny-cuda-nn are used for checkpoint parameter compatibility;
   per-frame field evaluation runs in Dr.Jit.
