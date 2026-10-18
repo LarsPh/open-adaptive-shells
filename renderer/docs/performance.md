@@ -19,6 +19,12 @@ generation and display are excluded; the viewer reports their timings
 separately. The rendered images match to within 1.2e-7, the run-to-run
 variation of the atomic compositing.
 
+In the GL viewer, a full frame at 1920 x 1080 on the RTX 4060 Ti, including ray
+generation, display, ImGui and swap, takes 5.1 ms for Khady and 7.1 ms for Horse
+(6.3 ms and 8.3 ms before display overlapped the next frame's rendering).
+Medians of 340 continuous frames after 60 warmup frames, camera preset 0,
+driver 610.88.
+
 ## Benchmark
 
 ```nu
